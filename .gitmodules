@@ -1,0 +1,9 @@
+[submodule "ext/libelfin"]
+	path = ext/libelfin
+	url = https://github.com/aclements/libelfin.git
+[submodule "ext/linenoise"]
+	path = ext/linenoise
+	url = https://github.com/antirez/linenoise.git
+[submodule "linenoise"]
+	path = linenoise
+	url = https://github.com/antirez/linenoise.git
