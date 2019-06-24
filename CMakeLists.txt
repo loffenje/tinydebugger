@@ -4,7 +4,7 @@ project (tinydebugger)
 add_compile_options(-std=c++14)
 
 include_directories(ext/libelfin ext/linenoise include)
-add_executable(tinydebugger src/main.cpp src/breakpoint.cpp src/debugger.cpp ext/linenoise/linenoise.c)
+add_executable(tinydebugger src/main.cpp src/breakpoint.cpp src/registers.cpp src/debugger.cpp ext/linenoise/linenoise.c)
 
 
 add_custom_target(

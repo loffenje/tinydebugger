@@ -18,10 +18,24 @@ namespace tinydebugger {
 
 	void setBreakpointAtAddress(std::intptr_t addr);
 
+	void dumpRegisters();
+
+	void stepOverBreakpoint();
+
     private:
 	void handleCommand(const std::string &line);
+	
 	void continueExecution();
 
+	uint64_t readMemory(uint64_t address);
+	
+	void writeMemory(uint64_t address, uint64_t value);
+
+	uint64_t getPC();
+
+	void setPC(uint64_t pc);
+
+	void waitForSignal();
     private:
 	std::unordered_map<std::intptr_t, Breakpoint> m_breakpoints;
 	std::string m_progName;
