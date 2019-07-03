@@ -2,6 +2,7 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <algorithm>
 #include <sys/ptrace.h>
@@ -43,22 +44,55 @@ void Debugger::setPC(uint64_t pc)
     setRegisterValue(m_pid, reg::rip, pc);
 }
 
+
+void Debugger::handleSigtrap(siginfo_t info) 
+{
+    switch (info.si_code) {
+	// these will be sent when a breakpoint is hit
+        case SI_KERNEL:
+	case TRAP_BRKPT: 
+	{
+	    setPC(getPC() - 1);
+	    std::cout << "Hit breakpoint at address 0x" << std::hex << getPC() << '\n';
+	    auto lineEntry = getLineEntryFromPC(getPC());
+	    printSource(lineEntry->file->path, lineEntry->line);
+	    return;
+	}
+	// this will be sent if the signal was sent by signal stepping
+	case TRAP_TRACE:
+	    return;
+	default:
+	    std::cout << "Unknown SIGTRAP code " << info.si_code << '\n';
+	    return;
+    }
+}
+
 void Debugger::waitForSignal()
 {
     int waitStatus;
     auto options = 0;
     waitpid(m_pid, &waitStatus, options);
+
+    auto siginfo = getSignalInfo();
+    
+    switch (siginfo.si_signo) {
+	case SIGTRAP:
+	    handleSigtrap(siginfo);
+	    break;
+	case SIGSEGV:
+	    std::cout << "SEGFAULT. Code: " << siginfo.si_code << std::endl;
+	    break;
+	default:
+	    std::cout << "Got signal " << strsignal(siginfo.si_signo) << std::endl;
+    }
 }
+
 
 void Debugger::stepOverBreakpoint()
 {
-   // -1 because execution will go past the breakpoint
-    auto possibleBreakpointLoc = getPC() - 1;
-    if (m_breakpoints.count(possibleBreakpointLoc)) {
-        auto &bp = m_breakpoints[possibleBreakpointLoc];
+    if (m_breakpoints.count(getPC())) {
+        auto &bp = m_breakpoints[getPC()];
 	if (bp.isEnabled()) {
-	   auto previousInstrAddr = possibleBreakpointLoc;
-	   setPC(previousInstrAddr);
 	   bp.disable();
 	   ptrace(PTRACE_SINGLESTEP, m_pid, nullptr, nullptr);
 	   waitForSignal();
@@ -135,6 +169,78 @@ uint64_t Debugger::readMemory(uint64_t address)
 void Debugger::writeMemory(uint64_t address, uint64_t value) 
 {
     ptrace(PTRACE_POKEDATA, m_pid, address, value);
+}
+
+dwarf::die Debugger::getFuncFromPC(uint64_t pc)
+{
+    for (auto &cu: m_dwarf.compilation_units()) {
+	if (die_pc_range(cu.root()).contains(pc)) {
+	    for (const auto &die: cu.root()) {
+		if (die.tag == dwarf::DW_TAG::subprogram) {
+		    if (die_pc_range(die).contains(pc)) {
+			return die;
+		    }
+		}
+	    }
+	}
+    }
+
+    throw std::out_of_range{"Cannot find a function"};
+}
+
+dwarf::line_table::iterator Debugger::getLineEntryFromPC(uint64_t pc)
+{
+    for (auto &cu: m_dwarf.compilation_units()) {
+	if (die_pc_range(cu.root()).contains(pc)) {
+	    auto &lt = cu.get_line_table();
+	    auto it = lt.find_address(pc);
+	    if (it == lt.end()) {
+		throw std::out_of_range{"Cannot find line entry"};
+	    } else {
+		return it;
+	    }
+	}
+    }
+
+    throw std::out_of_range{"Cannot find line entry"};
+}
+
+
+void Debugger::printSource(const std::string &fileName, unsigned int line, unsigned int nlinesContext) 
+{
+    std::ifstream file{fileName};
+
+    auto startLine = line <= nlinesContext ? 1 : line - nlinesContext;
+    auto endLine = line + nlinesContext + (line < nlinesContext ? nlinesContext - line : 0) + 1;
+
+    char c{};
+    auto currentLine = 1U;
+    while (currentLine != startLine && file.get(c)) {
+	if (c == '\n') {
+	    ++currentLine;
+	}
+    }
+
+    std::cout << (currentLine == line ? "> " : " ");
+
+    while (currentLine <= endLine && file.get(c)) {
+        std::cout << c;
+	if (c == '\n') {
+	    ++currentLine;
+
+	    std::cout << (currentLine == line ? "> " : " ");
+	}
+    }
+
+    std::cout << std::endl;
+}
+
+siginfo_t Debugger::getSignalInfo()
+{
+    siginfo_t info;
+    ptrace(PTRACE_GETSIGINFO, m_pid, nullptr, &info);
+
+    return info;
 }
 
 void Debugger::dumpRegisters() 
